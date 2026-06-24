@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="https://patty.io/patty-logo.svg" alt="Patty" width="120" />
+  <img src="https://raw.githubusercontent.com/patty-io/.github/main/profile/assets/patty-og.png" alt="Patty" width="400" />
 </p>
-
-<h1 align="center">Patty</h1>
 
 <p align="center">
   <em>Where AI Becomes Everyone's Superpower</em>
