@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/patty-io/.github/main/profile/assets/patty-og.png" alt="Patty" width="400" />
+  <img src="https://raw.githubusercontent.com/patty-io/.github/main/profile/assets/patty-logo.png" alt="Patty" width="280" />
 </p>
 
 <p align="center">
