@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/patty-io/.github/main/profile/assets/patty-logo.png" alt="Patty" width="320" />
-</p>
+<h1 align="center">Patty</h1>
 
 <p align="center">
   <em>Where AI Becomes Everyone's Superpower</em>
