@@ -1,0 +1,6 @@
+{
+  "name": "Patty container release",
+  "description": "Build one or more container images with standard Git provenance for Harbor and Kargo.",
+  "iconName": "octicon-package",
+  "categories": ["Deployment"]
+}

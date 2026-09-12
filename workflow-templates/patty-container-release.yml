@@ -1,0 +1,17 @@
+name: Patty container release
+
+on:
+  push:
+    branches: [forge]
+  workflow_dispatch: {}
+
+jobs:
+  release:
+    uses: patty-io/.github/.github/workflows/container-release.yml@main
+    with:
+      images: >-
+        [{"image":"registry.patty.io/replace-me/app","context":".","dockerfile":"Dockerfile","title":"Replace Me"}]
+    secrets:
+      registry_username: ${{ secrets.REGISTRY_USER }}
+      registry_password: ${{ secrets.REGISTRY_PASSWORD }}
+

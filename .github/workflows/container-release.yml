@@ -1,0 +1,182 @@
+name: Patty container release
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: JSON array of image, context, dockerfile, and optional title entries.
+        required: true
+        type: string
+    secrets:
+      registry_username:
+        required: true
+      registry_password:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: container-release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Resolve release metadata
+    runs-on: [self-hosted, linux, x64, garm]
+    timeout-minutes: 5
+    outputs:
+      subject: ${{ steps.git.outputs.subject }}
+      description: ${{ steps.git.outputs.description }}
+      author: ${{ steps.git.outputs.author }}
+      committed_at: ${{ steps.git.outputs.committed_at }}
+      built_at: ${{ steps.git.outputs.built_at }}
+      changed_files: ${{ steps.git.outputs.changed_files }}
+      pull_requests: ${{ steps.validate.outputs.result }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+
+      - name: Validate release definition and resolve pull requests
+        id: validate
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          IMAGES: ${{ inputs.images }}
+        with:
+          result-encoding: string
+          script: |
+            const images = JSON.parse(process.env.IMAGES);
+            if (!Array.isArray(images) || images.length < 1 || images.length > 10) {
+              core.setFailed('images must contain between 1 and 10 entries');
+              return '';
+            }
+            const seen = new Set();
+            for (const entry of images) {
+              if (!entry || typeof entry !== 'object') core.setFailed('each image entry must be an object');
+              if (typeof entry.image !== 'string' || !entry.image.startsWith('registry.patty.io/') || entry.image.includes('..')) {
+                core.setFailed('image destinations must be under registry.patty.io');
+              }
+              if (seen.has(entry.image)) core.setFailed(`duplicate image destination: ${entry.image}`);
+              seen.add(entry.image);
+              for (const field of ['context', 'dockerfile']) {
+                const value = entry[field];
+                if (typeof value !== 'string' || value.startsWith('/') || value.split('/').includes('..')) {
+                  core.setFailed(`${field} must be a repository-relative path`);
+                }
+              }
+              if (entry.title && (typeof entry.title !== 'string' || entry.title.length > 128)) {
+                core.setFailed('image titles must be at most 128 characters');
+              }
+            }
+            const pulls = await github.paginate(
+              github.rest.repos.listPullRequestsAssociatedWithCommit,
+              { owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha }
+            );
+            const selected = pulls.slice(0, 20).map(({ number, html_url }) => `#${number} ${html_url}`);
+            if (pulls.length > selected.length) selected.push(`+${pulls.length - selected.length} more`);
+            return selected.join(', ');
+
+      - name: Resolve source metadata
+        id: git
+        shell: bash
+        run: |
+          set -euo pipefail
+          subject=$(git log -1 --format=%s "$GITHUB_SHA")
+          description=$(git log -1 --format='%s%n%n%b' "$GITHUB_SHA" | tr '\r\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g; s/[[:space:]]*$//' | cut -c1-1024)
+          author=$(git log -1 --format='%an <%ae>' "$GITHUB_SHA")
+          committed_at=$(git log -1 --format=%cI "$GITHUB_SHA")
+          built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          changed_count=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | wc -l | tr -d ' ')
+          changed_files=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | awk 'NR <= 50' | paste -sd, -)
+          if [ "$changed_count" -gt 50 ]; then
+            changed_files="${changed_files},+$((changed_count - 50)) more"
+          fi
+          {
+            printf 'subject=%s\n' "$subject"
+            printf 'description=%s\n' "$description"
+            printf 'author=%s\n' "$author"
+            printf 'committed_at=%s\n' "$committed_at"
+            printf 'built_at=%s\n' "$built_at"
+            printf 'changed_files=%s\n' "$changed_files"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: source
+    name: Build ${{ matrix.title || matrix.image }}
+    runs-on: [self-hosted, linux, x64, garm]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.images) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ matrix.image }}
+          tags: type=raw,value=sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          annotations: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ needs.source.outputs.built_at }}
+            org.opencontainers.image.version=sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+            org.opencontainers.image.title=${{ matrix.title || matrix.image }}
+            org.opencontainers.image.description=${{ needs.source.outputs.description }}
+            io.patty.git.title=${{ needs.source.outputs.subject }}
+            io.patty.git.branch=${{ github.ref_name }}
+            io.patty.git.author=${{ needs.source.outputs.author }}
+            io.patty.git.committed-at=${{ needs.source.outputs.committed_at }}
+            io.patty.git.changed-files=${{ needs.source.outputs.changed_files }}
+            io.patty.git.pull-requests=${{ needs.source.outputs.pull_requests }}
+            io.patty.git.commit-url=${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+            io.patty.ci.workflow-url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            io.patty.ci.result=success
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: registry.patty.io
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          annotations: ${{ steps.metadata.outputs.annotations }}
+          cache-from: type=registry,ref=${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=${{ matrix.image }}:buildcache,mode=max
+
+      - name: Publish release summary
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SUBJECT: ${{ needs.source.outputs.subject }}
+          AUTHOR: ${{ needs.source.outputs.author }}
+          COMMITTED_AT: ${{ needs.source.outputs.committed_at }}
+          PULL_REQUESTS: ${{ needs.source.outputs.pull_requests }}
+          CHANGED_FILES: ${{ needs.source.outputs.changed_files }}
+        run: |
+          {
+            printf '### %s\n\n' "$IMAGE"
+            printf -- '- Source: [%s](%s/%s/commit/%s)\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf -- '- Commit: %s\n' "$SUBJECT"
+            printf -- '- Author: %s\n' "$AUTHOR"
+            printf -- '- Committed: %s\n' "$COMMITTED_AT"
+            printf -- '- Pull requests: %s\n' "${PULL_REQUESTS:-none}"
+            printf -- '- Changed files: %s\n' "${CHANGED_FILES:-none}"
+            printf -- '- Image: %s@%s\n' "$IMAGE" "$DIGEST"
+            printf -- '- Build: [%s](%s/%s/actions/runs/%s)\n' "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"

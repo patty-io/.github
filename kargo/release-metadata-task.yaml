@@ -1,0 +1,55 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: patty-release-metadata
+  annotations:
+    kargo.akuity.io/description: Record OCI provenance on Freight and Stage; multi-image Warehouses must require matching tags.
+spec:
+  vars:
+    - name: imageRepo
+  steps:
+    - uses: set-freight-alias
+      config:
+        name: ${{ ctx.targetFreight.name }}
+        alias: ${{ imageFrom(vars.imageRepo).Tag }}
+    - uses: set-metadata
+      config:
+        updates:
+          - kind: Freight
+            name: ${{ ctx.targetFreight.name }}
+            values:
+              releaseRevision: ${{ imageFrom(vars.imageRepo).Annotations['org.opencontainers.image.revision'] }}
+              sourceBranch: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.branch'] }}
+              sourceURL: ${{ imageFrom(vars.imageRepo).Annotations['org.opencontainers.image.source'] }}
+              commitURL: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.commit-url'] }}
+              commitTitle: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.title'] }}
+              commitDescription: ${{ imageFrom(vars.imageRepo).Annotations['org.opencontainers.image.description'] }}
+              commitAuthor: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.author'] }}
+              committedAt: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.committed-at'] }}
+              pullRequests: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.pull-requests'] }}
+              changedFiles: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.git.changed-files'] }}
+              imageTag: ${{ imageFrom(vars.imageRepo).Tag }}
+              imageDigest: ${{ imageFrom(vars.imageRepo).Digest }}
+              ciBuildURL: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.ci.workflow-url'] }}
+              ciResult: ${{ imageFrom(vars.imageRepo).Annotations['io.patty.ci.result'] }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: patty-stage-release-metadata
+  annotations:
+    kargo.akuity.io/description: Record a release as deployed only after Argo CD is healthy and synced.
+spec:
+  vars:
+    - name: imageRepo
+  steps:
+    - uses: set-metadata
+      config:
+        updates:
+          - kind: Stage
+            name: ${{ ctx.stage }}
+            values:
+              targetEnvironment: ${{ ctx.stage }}
+              releaseRevision: ${{ imageFrom(vars.imageRepo).Annotations['org.opencontainers.image.revision'] }}
+              comparisonURL: >-
+                ${{ stageMetadata(ctx.stage)?.releaseRevision != nil && stageMetadata(ctx.stage)?.releaseRevision != '' ? imageFrom(vars.imageRepo).Annotations['org.opencontainers.image.source'] + '/compare/' + stageMetadata(ctx.stage).releaseRevision + '...' + imageFrom(vars.imageRepo).Annotations['org.opencontainers.image.revision'] : imageFrom(vars.imageRepo).Annotations['io.patty.git.commit-url'] }}
