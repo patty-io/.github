@@ -88,8 +88,15 @@ jobs:
           author=$(git log -1 --format='%an <%ae>' "$GITHUB_SHA")
           committed_at=$(git log -1 --format=%cI "$GITHUB_SHA")
           built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          changed_count=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | wc -l | tr -d ' ')
-          changed_files=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | awk 'NR <= 50' | paste -sd, -)
+          changed_list=$(mktemp)
+          if git rev-parse --verify "$GITHUB_SHA^1" >/dev/null 2>&1; then
+            git diff --name-only "$GITHUB_SHA^1" "$GITHUB_SHA" > "$changed_list"
+          else
+            git show --pretty=format: --name-only "$GITHUB_SHA" > "$changed_list"
+          fi
+          changed_count=$(wc -l < "$changed_list" | tr -d ' ')
+          changed_files=$(awk 'NR <= 50' "$changed_list" | paste -sd, -)
+          rm -f "$changed_list"
           if [ "$changed_count" -gt 50 ]; then
             changed_files="${changed_files},+$((changed_count - 50)) more"
           fi

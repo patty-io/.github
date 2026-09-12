@@ -11,7 +11,7 @@ JSON with one entry per deployable image. Each Harbor robot remains scoped to
 the caller's project. Callers should pin a released major version such as `v1`;
 production repositories may pin the exact workflow commit for reproducibility.
 
-The workflow publishes immutable `sha-<commit>` images with OCI source,
+The workflow publishes immutable `sha-<commit>-run-<run-id>-<attempt>` images with OCI source,
 revision, build, commit, pull-request, and changed-file annotations. Kargo
 imports those annotations into Freight. Failed builds remain visible in GitHub
 Actions but do not become release candidates.
@@ -37,4 +37,3 @@ and promotion status.
 ```sh
 sh scripts/release-workflow.test.sh
 ```
-
