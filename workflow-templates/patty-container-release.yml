@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    uses: patty-io/.github/.github/workflows/container-release.yml@3a57bcb3717b7645804d468260932158f5e7a29b
+    uses: patty-io/.github/.github/workflows/container-release.yml@9f4d7ff0ab889b6a9db975331cb93cfd4d521d9c
     with:
       images: >-
         [{"image":"registry.patty.io/replace-me/app","context":".","dockerfile":"Dockerfile","title":"Replace Me"}]
