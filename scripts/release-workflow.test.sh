@@ -55,7 +55,7 @@ ruby -e '
 
   template_jobs = caller.fetch("jobs")
   release = template_jobs.fetch("release")
-  raise "template must call the shared workflow" unless release.fetch("uses") == "patty-io/.github/.github/workflows/container-release.yml@main"
+  raise "template must pin the shared workflow" unless release.fetch("uses").match?(%r{\Apatty-io/\.github/\.github/workflows/container-release\.yml@[0-9a-f]{40}\z})
 
   raise "promotion metadata manifest must contain two tasks" unless task.fetch("kind") == "ClusterPromotionTask"
 ' "$workflow" "$template" "$promotion_task"

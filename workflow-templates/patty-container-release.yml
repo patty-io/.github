@@ -7,11 +7,10 @@ on:
 
 jobs:
   release:
-    uses: patty-io/.github/.github/workflows/container-release.yml@main
+    uses: patty-io/.github/.github/workflows/container-release.yml@3a57bcb3717b7645804d468260932158f5e7a29b
     with:
       images: >-
         [{"image":"registry.patty.io/replace-me/app","context":".","dockerfile":"Dockerfile","title":"Replace Me"}]
     secrets:
       registry_username: ${{ secrets.REGISTRY_USER }}
       registry_password: ${{ secrets.REGISTRY_PASSWORD }}
-
