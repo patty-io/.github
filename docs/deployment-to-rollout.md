@@ -53,10 +53,10 @@ for _, name := range []string{"<app>-api", "<app>-web"} {
     }
     findResource(t, resources, "Service", name)          // active
     findResource(t, resources, "Service", name+"-preview")
-    dep := findResource(t, resources, "Deployment", name) // transitional blue
-    if rollout.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
-        t.Errorf("%s Rollout and Deployment must run the same image during migration", name)
-    }
+    // During the migration window ONLY, additionally assert the Rollout runs the
+    // same image as the still-present transitional Deployment (no version mix).
+    // After the Deployment is removed, drop that assertion — the parity guard
+    // lives in the transitional step, not in steady state.
 }
 ```
 
@@ -77,5 +77,5 @@ separately, so order them deliberately.
 
 ## Reference implementations
 
-- `patty-accounts/deploy/base/{api,web}-rollout.yaml` — in progress (PAT-2753)
-- `patty-corp/deploy/base/rollout.yaml` — converted (staging), prod side-by-side
+- `patty-accounts/deploy/base/{api,web}-rollout.yaml` — converted (staging + production)
+- `patty-corp/deploy/base/rollout.yaml` — converted (staging + production)
