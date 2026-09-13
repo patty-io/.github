@@ -1,0 +1,39 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: patty-promote-app
+  annotations:
+    kargo.akuity.io/description: >-
+      Shared promotion mechanics — clone the app repo, pin every Freight image
+      digest into the target overlay, commit and push. Apps keep their own
+      release-metadata and argocd-update/wait steps around this task.
+spec:
+  vars:
+    - name: repoURL
+    - name: branch
+    - name: overlayPath
+    - name: commitMessage
+  steps:
+    - uses: git-clone
+      as: clone
+      config:
+        repoURL: ${{ vars.repoURL }}
+        checkout:
+          - branch: ${{ vars.branch }}
+            path: ./out
+    # No `images:` list on purpose: every Freight image is set automatically,
+    # digest-pinned.
+    - uses: kustomize-set-image
+      as: update-image
+      config:
+        path: ./out/${{ vars.overlayPath }}
+    - uses: git-commit
+      as: commit
+      config:
+        path: ./out
+        message: ${{ vars.commitMessage }}
+    - uses: git-push
+      as: push
+      config:
+        path: ./out
+        targetBranch: ${{ vars.branch }}
