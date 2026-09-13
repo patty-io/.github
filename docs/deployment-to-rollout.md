@@ -64,6 +64,17 @@ Also assert the Application config so the selector guard cannot silently regress
 decode `argocd/apps.yaml` and require `ignoreDifferences` of `kind: Service` with
 `jsonPointers: [/spec/selector]` plus `RespectIgnoreDifferences=true`.
 
+## Gotcha: a probe must not outrun the image
+
+Changing the readiness probe path (e.g. to a new `/ready`) **before** the image
+that serves it is promoted makes every pod carrying the new probe NotReady —
+including the blue stack, if it re-rolls. During the accounts migration this
+stuck the green web ReplicaSet (probe `404`), and a blue re-roll would have taken
+web down. Ship the route in the image first (build + promote), then switch the
+probe; if the image is behind, point readiness at the existing dependency-free
+path until the new image is live. Migration manifests and their images promote
+separately, so order them deliberately.
+
 ## Reference implementations
 
 - `patty-accounts/deploy/base/{api,web}-rollout.yaml` — in progress (PAT-2753)
