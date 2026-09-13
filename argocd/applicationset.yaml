@@ -1,0 +1,59 @@
+# One ApplicationSet for every Patty app/env, applied to the TOOLING k3s
+# (namespace `argocd`) by the platform owner. It exists so the blue/green
+# Service-selector guard — `ignoreDifferences` + `RespectIgnoreDifferences` — is
+# written once and cannot drift per app (a drift silently reverts the Argo
+# Rollouts-owned selector and one URL serves two versions again).
+#
+# Adopting it: apply this ApplicationSet, then delete the per-repo
+# `deploy/argocd/apps.yaml` Application objects (patty-corp, patty-accounts) so
+# this becomes the single owner. The per-repo files remain until then.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: patty-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - app: patty-corp
+            repo: https://github.com/patty-io/patty-corp.git
+            stage: staging
+            namespace: forge
+          - app: patty-corp
+            repo: https://github.com/patty-io/patty-corp.git
+            stage: production
+            namespace: nexus
+          - app: patty-accounts
+            repo: https://github.com/patty-io/patty-accounts.git
+            stage: staging
+            namespace: forge
+          - app: patty-accounts
+            repo: https://github.com/patty-io/patty-accounts.git
+            stage: production
+            namespace: nexus
+  template:
+    metadata:
+      name: '{{.app}}-{{.stage}}'
+      namespace: argocd
+      annotations:
+        # Kargo v1.11 argocd-update refuses an unannotated Application.
+        kargo.akuity.io/authorized-stage: '{{.app}}:{{.stage}}'
+    spec:
+      project: default
+      source:
+        repoURL: '{{.repo}}'
+        targetRevision: forge
+        path: 'deploy/overlays/{{.stage}}'
+      destination:
+        name: rho-cluster
+        namespace: '{{.namespace}}'
+      ignoreDifferences:
+        - kind: Service
+          jsonPointers: [/spec/selector]
+      syncPolicy:
+        automated: {}
+        syncOptions:
+          - RespectIgnoreDifferences=true

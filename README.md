@@ -42,6 +42,17 @@ owner applies it alongside `release-metadata-task.yaml`; apply both **before**
 merging any Stage that references them, or every promotion fails with
 "task not found".
 
+## Delivery standards
+
+- `docs/adr/0001-code-and-data-release-standard.md` — the release standard every
+  DB-backed app follows (migrate-first, expand/contract, no per-instance DB
+  cache, blue/green with dependency-aware readiness).
+- `docs/deployment-to-rollout.md` — the staged Deployment → Rollout blue/green
+  migration procedure, with a copyable guard test.
+- `argocd/applicationset.yaml` — the single source for each app/env Argo CD
+  Application, including the blue/green Service-selector guard
+  (`ignoreDifferences` + `RespectIgnoreDifferences`).
+
 ## Validation
 
 ```sh
