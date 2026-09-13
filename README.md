@@ -32,6 +32,16 @@ summary, immutable image digest, target environment, and deployed-to-candidate
 comparison link in Kargo metadata. Kargo remains authoritative for verification
 and promotion status.
 
+## Shared promotion mechanics
+
+`kargo/promote-app-task.yaml` defines `ClusterPromotionTask/patty-promote-app`:
+the generic clone → pin every Freight image digest into the overlay → commit →
+push sequence. App Stages reference it and keep only what is app-specific (the
+release-metadata tasks and `argocd-update`/`argocd-wait`). The tooling-cluster
+owner applies it alongside `release-metadata-task.yaml`; apply both **before**
+merging any Stage that references them, or every promotion fails with
+"task not found".
+
 ## Validation
 
 ```sh

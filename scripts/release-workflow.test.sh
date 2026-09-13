@@ -5,16 +5,18 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 workflow="$repo_root/.github/workflows/container-release.yml"
 template="$repo_root/workflow-templates/patty-container-release.yml"
 promotion_task="$repo_root/kargo/release-metadata-task.yaml"
+promote_app_task="$repo_root/kargo/promote-app-task.yaml"
 
 actionlint "$workflow" "$template"
 
 ruby -e '
   require "yaml"
 
-  workflow, template, promotion_task = ARGV
+  workflow, template, promotion_task, promote_app_task = ARGV
   reusable = YAML.safe_load_file(workflow, aliases: true)
   caller = YAML.safe_load_file(template, aliases: true)
   task = YAML.safe_load_file(promotion_task, aliases: true)
+  promote = YAML.safe_load_file(promote_app_task, aliases: true)
 
   trigger = reusable.fetch(true).fetch("workflow_call")
   inputs = trigger.fetch("inputs")
@@ -58,4 +60,14 @@ ruby -e '
   raise "template must pin the shared workflow" unless release.fetch("uses").match?(%r{\Apatty-io/\.github/\.github/workflows/container-release\.yml@[0-9a-f]{40}\z})
 
   raise "promotion metadata manifest must contain two tasks" unless task.fetch("kind") == "ClusterPromotionTask"
-' "$workflow" "$template" "$promotion_task"
+
+  raise "promote-app task name" unless promote.dig("metadata", "name") == "patty-promote-app"
+  promote_vars = promote.fetch("spec").fetch("vars").map { |v| v.fetch("name") }
+  %w[repoURL branch overlayPath commitMessage].each do |name|
+    raise "promote-app missing var #{name}" unless promote_vars.include?(name)
+  end
+  promote_steps = promote.fetch("spec").fetch("steps").map { |s| s.fetch("uses") }
+  unless promote_steps == %w[git-clone kustomize-set-image git-commit git-push]
+    raise "promote-app must clone, pin, commit, push (got: #{promote_steps.inspect})"
+  end
+' "$workflow" "$template" "$promotion_task" "$promote_app_task"
