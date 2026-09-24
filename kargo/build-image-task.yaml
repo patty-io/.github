@@ -1,0 +1,81 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: patty-build-image
+  annotations:
+    kargo.akuity.io/description: >-
+      Shared build mechanics (PAT-3210). Starts the repo's image-build workflow
+      for the commit in the target Freight, links the GitHub run on the Freight,
+      and waits until the run succeeds or fails. The image it produces reaches
+      Kargo through the project's image Warehouse, not through this task.
+spec:
+  # Every project's `build` stage sets these. The build workflow must accept a
+  # `sha` input on workflow_dispatch (the build workflow contract).
+  vars:
+    - name: repo          # e.g. patty-io/mirr-code
+    - name: workflow      # workflow file name, e.g. release-mirr-image.yml
+    - name: branch        # ref the workflow runs on (the repo's build branch)
+    - name: repoURL       # git URL the source Warehouse watches
+  steps:
+    # Token: 1-hour patty-garm installation token, renewed every 30 min by
+    # External Secrets (patty-infra contabo-europe/kargo/build-token.yaml).
+    # return_run_details makes GitHub answer 200 with the run id instead of 204.
+    - uses: http
+      as: dispatch
+      retry:
+        timeout: 5m
+      config:
+        method: POST
+        url: https://api.github.com/repos/${{ vars.repo }}/actions/workflows/${{ vars.workflow }}/dispatches
+        headers:
+          - name: Authorization
+            value: Bearer ${{ sharedSecret('github-build-dispatch').token }}
+          - name: Accept
+            value: application/vnd.github+json
+          - name: X-GitHub-Api-Version
+            value: "2022-11-28"
+          - name: Content-Type
+            value: application/json
+        body: |
+          ${{ quote({
+            "ref": vars.branch,
+            "inputs": {"sha": commitFrom(vars.repoURL).ID},
+            "return_run_details": true
+          }) }}
+        successExpression: response.status == 200
+        # 4xx will not fix itself (wrong workflow, missing sha input, repo not
+        # in the token's list): fail now instead of retrying for 5 minutes.
+        failureExpression: response.status >= 400 && response.status < 500
+        errorExpression: "'GitHub refused the dispatch (' + string(response.status) + '): ' + string(response.body.message)"
+        outputs:
+          - name: runID
+            fromExpression: response.body.workflow_run_id
+          - name: runURL
+            fromExpression: response.body.html_url
+    - uses: set-metadata
+      as: link-run
+      config:
+        updates:
+          - kind: Freight
+            name: ${{ ctx.targetFreight.name }}
+            values:
+              buildRun: ${{ task.outputs.dispatch.runURL }}
+    - uses: http
+      as: wait
+      # Longest build today: mirr-code release, about 25 min plus queueing.
+      retry:
+        timeout: 90m
+      config:
+        method: GET
+        url: https://api.github.com/repos/${{ vars.repo }}/actions/runs/${{ task.outputs.dispatch.runID }}
+        headers:
+          - name: Authorization
+            value: Bearer ${{ sharedSecret('github-build-dispatch').token }}
+          - name: Accept
+            value: application/vnd.github+json
+          - name: X-GitHub-Api-Version
+            value: "2022-11-28"
+        pollInterval: 30s
+        successExpression: response.status == 200 && response.body.status == 'completed' && response.body.conclusion == 'success'
+        failureExpression: response.status == 200 && response.body.status == 'completed' && response.body.conclusion != 'success'
+        errorExpression: "'build ' + string(response.body.conclusion) + ': ' + string(response.body.html_url)"
