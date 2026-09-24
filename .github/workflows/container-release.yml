@@ -7,6 +7,13 @@ on:
         description: JSON array of image, context, dockerfile, and optional title entries.
         required: true
         type: string
+      ref:
+        description: >-
+          Commit to build. Empty means the commit that triggered the caller.
+          Kargo build stages pass the chosen commit here (PAT-3210).
+        required: false
+        type: string
+        default: ''
     secrets:
       registry_username:
         required: true
@@ -17,9 +24,15 @@ permissions:
   contents: read
   pull-requests: read
 
+# A running build always finishes; builds of the same branch collapse into one
+# queued run. A chosen commit (ref) queues on its own, so a later push can never
+# replace a build that Kargo is waiting for (PAT-3210).
 concurrency:
-  group: container-release-${{ github.repository }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: container-release-${{ github.repository }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  TARGET_SHA: ${{ inputs.ref || github.sha }}
 
 jobs:
   source:
@@ -37,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ env.TARGET_SHA }}
           fetch-depth: 2
 
       - name: Validate release definition and resolve pull requests
@@ -44,6 +58,7 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           IMAGES: ${{ inputs.images }}
+          TARGET_SHA: ${{ env.TARGET_SHA }}
         with:
           result-encoding: string
           script: |
@@ -72,7 +87,7 @@ jobs:
             }
             const pulls = await github.paginate(
               github.rest.repos.listPullRequestsAssociatedWithCommit,
-              { owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha }
+              { owner: context.repo.owner, repo: context.repo.repo, commit_sha: process.env.TARGET_SHA }
             );
             const selected = pulls.slice(0, 20).map(({ number, html_url }) => `#${number} ${html_url}`);
             if (pulls.length > selected.length) selected.push(`+${pulls.length - selected.length} more`);
@@ -83,16 +98,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          subject=$(git log -1 --format=%s "$GITHUB_SHA")
-          description=$(git log -1 --format='%s%n%n%b' "$GITHUB_SHA" | tr '\r\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g; s/[[:space:]]*$//' | cut -c1-1024)
-          author=$(git log -1 --format='%an <%ae>' "$GITHUB_SHA")
-          committed_at=$(git log -1 --format=%cI "$GITHUB_SHA")
+          subject=$(git log -1 --format=%s "$TARGET_SHA")
+          description=$(git log -1 --format='%s%n%n%b' "$TARGET_SHA" | tr '\r\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g; s/[[:space:]]*$//' | cut -c1-1024)
+          author=$(git log -1 --format='%an <%ae>' "$TARGET_SHA")
+          committed_at=$(git log -1 --format=%cI "$TARGET_SHA")
           built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           changed_list=$(mktemp)
-          if git rev-parse --verify "$GITHUB_SHA^1" >/dev/null 2>&1; then
-            git diff --name-only "$GITHUB_SHA^1" "$GITHUB_SHA" > "$changed_list"
+          if git rev-parse --verify "$TARGET_SHA^1" >/dev/null 2>&1; then
+            git diff --name-only "$TARGET_SHA^1" "$TARGET_SHA" > "$changed_list"
           else
-            git show --pretty=format: --name-only "$GITHUB_SHA" > "$changed_list"
+            git show --pretty=format: --name-only "$TARGET_SHA" > "$changed_list"
           fi
           changed_count=$(wc -l < "$changed_list" | tr -d ' ')
           changed_files=$(awk 'NR <= 50' "$changed_list" | paste -sd, -)
@@ -120,6 +135,8 @@ jobs:
         include: ${{ fromJSON(inputs.images) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
 
       - name: Generate image metadata
         id: metadata
@@ -128,12 +145,12 @@ jobs:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ matrix.image }}
-          tags: type=raw,value=sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          tags: type=raw,value=sha-${{ env.TARGET_SHA }}-run-${{ github.run_id }}-${{ github.run_attempt }}
           annotations: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ env.TARGET_SHA }}
             org.opencontainers.image.created=${{ needs.source.outputs.built_at }}
-            org.opencontainers.image.version=sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+            org.opencontainers.image.version=sha-${{ env.TARGET_SHA }}-run-${{ github.run_id }}-${{ github.run_attempt }}
             org.opencontainers.image.title=${{ matrix.title || matrix.image }}
             org.opencontainers.image.description=${{ needs.source.outputs.description }}
             io.patty.git.title=${{ needs.source.outputs.subject }}
@@ -142,7 +159,7 @@ jobs:
             io.patty.git.committed-at=${{ needs.source.outputs.committed_at }}
             io.patty.git.changed-files=${{ needs.source.outputs.changed_files }}
             io.patty.git.pull-requests=${{ needs.source.outputs.pull_requests }}
-            io.patty.git.commit-url=${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+            io.patty.git.commit-url=${{ github.server_url }}/${{ github.repository }}/commit/${{ env.TARGET_SHA }}
             io.patty.ci.workflow-url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             io.patty.ci.result=success
 
@@ -178,7 +195,7 @@ jobs:
         run: |
           {
             printf '### %s\n\n' "$IMAGE"
-            printf -- '- Source: [%s](%s/%s/commit/%s)\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf -- '- Source: [%s](%s/%s/commit/%s)\n' "$TARGET_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$TARGET_SHA"
             printf -- '- Commit: %s\n' "$SUBJECT"
             printf -- '- Author: %s\n' "$AUTHOR"
             printf -- '- Committed: %s\n' "$COMMITTED_AT"
