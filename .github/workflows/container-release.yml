@@ -37,7 +37,8 @@ env:
 jobs:
   source:
     name: Resolve release metadata
-    runs-on: [self-hosted, linux, x64, garm]
+    # The garm-build pool is 8 CPU / 12 GB: image builds do not fit a 4 CPU runner since PAT-3122 moved container work off the host Docker daemon.
+    runs-on: [self-hosted, linux, x64, garm-build]
     timeout-minutes: 5
     outputs:
       subject: ${{ steps.git.outputs.subject }}
@@ -127,7 +128,7 @@ jobs:
   build:
     needs: source
     name: Build ${{ matrix.title || matrix.image }}
-    runs-on: [self-hosted, linux, x64, garm]
+    runs-on: [self-hosted, linux, x64, garm-build]
     timeout-minutes: 30
     strategy:
       fail-fast: false
