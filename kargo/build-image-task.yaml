@@ -62,9 +62,11 @@ spec:
               buildRun: ${{ task.outputs.dispatch.runURL }}
     - uses: http
       as: wait
-      # Longest build today: mirr-code release, about 25 min plus queueing.
+      # 2026-09-25: queue alone ate 90 min on a bad night (runners shared with
+      # CI, caps at 10). Longest build ~45 min. Watchdog must cover worst queue
+      # + longest build + margin; true stalls are caught by GitHub job timeouts.
       retry:
-        timeout: 90m
+        timeout: 240m
       config:
         method: GET
         url: https://api.github.com/repos/${{ vars.repo }}/actions/runs/${{ task.outputs.dispatch.runID }}
