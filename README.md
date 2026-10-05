@@ -32,6 +32,10 @@ summary, immutable image digest, target environment, and deployed-to-candidate
 comparison link in Kargo metadata. Kargo remains authoritative for verification
 and promotion status.
 
+The display alias retains up to 50 tag bytes and a 12-byte digest fragment so
+it fits Kubernetes' 63-byte label limit. The complete tag, source revision and
+digest remain in metadata; deployment always uses the immutable Freight digest.
+
 ## Shared promotion mechanics
 
 `kargo/promote-app-task.yaml` defines `ClusterPromotionTask/patty-promote-app`:
@@ -54,6 +58,10 @@ merging any Stage that references them, or every promotion fails with
   (`ignoreDifferences` + `RespectIgnoreDifferences`).
 
 ## Validation
+
+Requires Go 1.26 and actionlint. The release-alias suite evaluates the actual
+task YAML with Expr v1.17.8, matching Kargo v1.11.4, and checks label bounds,
+rebuilt-image distinction, and preservation of the full release metadata.
 
 ```sh
 sh scripts/release-workflow.test.sh

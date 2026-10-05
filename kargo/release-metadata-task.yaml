@@ -8,13 +8,14 @@ spec:
   vars:
     - name: imageRepo
   steps:
-    # Append a digest fragment so CI re-runs of the same commit (same tag,
-    # new digest) get distinct aliases instead of colliding on the
-    # project-wide alias uniqueness check.
+    # Aliases become Kubernetes labels: at most 63 bytes. Keep up to 50 ASCII
+    # tag bytes plus a separator and the 12-byte digest fragment, preserving
+    # rebuilt-image uniqueness. Full tag/source/digest metadata stays below.
     - uses: set-freight-alias
       config:
         name: ${{ ctx.targetFreight.name }}
-        alias: ${{ imageFrom(vars.imageRepo).Tag + '-' + imageFrom(vars.imageRepo).Digest[7:19] }}
+        alias: >-
+          ${{ (len(imageFrom(vars.imageRepo).Tag) > 50 ? imageFrom(vars.imageRepo).Tag[:50] : imageFrom(vars.imageRepo).Tag) + '-' + imageFrom(vars.imageRepo).Digest[7:19] }}
     - uses: set-metadata
       config:
         updates:

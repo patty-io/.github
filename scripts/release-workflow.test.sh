@@ -71,3 +71,7 @@ ruby -e '
     raise "promote-app must clone, pin, commit, push (got: #{promote_steps.inspect})"
   end
 ' "$workflow" "$template" "$promotion_task" "$promote_app_task"
+
+# Exercise the task's actual YAML expression with Kargo's pinned Expr engine.
+# No Docker, registry, cluster, or provider call is made by this regression.
+GOWORK=off go -C "$repo_root/tests/release-alias" test -mod=readonly ./... -count=1
