@@ -1,0 +1,53 @@
+name: Kargo build layer cache
+description: >-
+  Logs Docker in to the BuildKit layer cache on the GARM host and returns this
+  image's cache ref. Returns an empty ref (build without the cache) when the
+  job has no BUILD_CACHE_PASSWORD or the cache is unreachable, so the cache can
+  never fail a build.
+
+# Why a local forwarder: Docker trusts registries on 127.0.0.0/8 over plain
+# HTTP, so 127.0.0.1:5001 -> 10.201.0.1:5001 (the cache registry on the GARM
+# host, patty-infra contabo-europe/ci-buildcache) works with the stock runner
+# image. Who may write: the password exists only in each repository's
+# `image-build` environment, which only the Kargo dispatch branch may use, so a
+# pull request job never gets it (KB: Onboarding a New App to the Pipeline).
+
+inputs:
+  password:
+    description: secrets.BUILD_CACHE_PASSWORD from the job's image-build environment
+    required: false
+    default: ""
+  image:
+    description: The image being built (registry.patty.io/<project>/<name>); the cache ref mirrors its path
+    required: true
+
+outputs:
+  ref:
+    description: 127.0.0.1:5001/<project>/<name>:buildcache, or empty when the cache is not available
+    value: ${{ steps.login.outputs.ref }}
+
+runs:
+  using: composite
+  steps:
+    - id: login
+      shell: bash
+      env:
+        PASSWORD: ${{ inputs.password }}
+        IMAGE: ${{ inputs.image }}
+      run: |
+        if [ -z "$PASSWORD" ]; then
+          echo "::notice::No BUILD_CACHE_PASSWORD (job outside the image-build environment): building without the layer cache."
+          exit 0
+        fi
+        if ! curl -s -o /dev/null --max-time 2 http://127.0.0.1:5001/v2/; then
+          (socat TCP-LISTEN:5001,bind=127.0.0.1,fork,reuseaddr TCP:10.201.0.1:5001 >/dev/null 2>&1 &)
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            curl -s -o /dev/null --max-time 2 http://127.0.0.1:5001/v2/ && break
+            sleep 1
+          done
+        fi
+        if printf %s "$PASSWORD" | docker login 127.0.0.1:5001 -u buildcache --password-stdin >/dev/null 2>&1; then
+          echo "ref=127.0.0.1:5001/${IMAGE#registry.patty.io/}:buildcache" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Build layer cache unreachable: building without it."
+        fi
