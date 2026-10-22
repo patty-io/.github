@@ -19,6 +19,11 @@ on:
         required: true
       registry_password:
         required: true
+      # Callers do not pass this: the build job's `environment: image-build`
+      # resolves it from the calling repository's environment, which only its
+      # Kargo dispatch branch may use. Absent (any other ref) = uncached build.
+      build_cache_password:
+        required: false
 
 permissions:
   contents: read
@@ -129,6 +134,9 @@ jobs:
     needs: source
     name: Build ${{ matrix.title || matrix.image }}
     runs-on: [self-hosted, linux, x64, garm-build]
+    # The build layer cache password lives only in the calling repository's
+    # image-build environment, which only its Kargo dispatch branch may use.
+    environment: image-build
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -170,6 +178,13 @@ jobs:
           username: ${{ secrets.registry_username }}
           password: ${{ secrets.registry_password }}
 
+      - name: Build layer cache
+        id: cache
+        uses: patty-io/.github/.github/actions/build-cache@6463dacc1da38e09ff1eef1b9f5e12f2aa3b3ee2
+        with:
+          password: ${{ secrets.build_cache_password }}
+          image: ${{ matrix.image }}
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -180,8 +195,10 @@ jobs:
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           annotations: ${{ steps.metadata.outputs.annotations }}
-          cache-from: type=registry,ref=${{ matrix.image }}:buildcache
-          cache-to: type=registry,ref=${{ matrix.image }}:buildcache,mode=max
+          # GARM-host layer cache. Harbor is in contabo-japan: importing its
+          # cache ran at ~1.3 MB/s and exporting took ~109 s per build.
+          cache-from: ${{ steps.cache.outputs.ref && format('type=registry,ref={0}', steps.cache.outputs.ref) || '' }}
+          cache-to: ${{ steps.cache.outputs.ref && format('type=registry,ref={0},mode=max,ignore-error=true', steps.cache.outputs.ref) || '' }}
 
       - name: Publish release summary
         shell: bash
