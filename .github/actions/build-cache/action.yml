@@ -21,10 +21,22 @@ inputs:
     description: The image being built (registry.patty.io/<project>/<name>); the cache ref mirrors its path
     required: true
 
+# Workflows pass cache-from / cache-to straight to docker/build-push-action (or
+# `docker build --cache-from/--cache-to`), so cache settings change here, once.
+# compression=uncompressed: the cache registry is on the same host, so gzip buys
+# nothing, and compressing mode=max layers was ~165 s of every build
+# ("preparing build cache for export", pccp 2026-10-23). The image pushed to
+# Harbor keeps its normal compression.
 outputs:
   ref:
     description: 127.0.0.1:5001/<project>/<name>:buildcache, or empty when the cache is not available
     value: ${{ steps.login.outputs.ref }}
+  cache-from:
+    description: The cache-from value for this image, or empty when the cache is not available
+    value: ${{ steps.login.outputs.cache-from }}
+  cache-to:
+    description: The cache-to value for this image (mode=max, uncompressed, errors ignored), or empty when the cache is not available
+    value: ${{ steps.login.outputs.cache-to }}
 
 runs:
   using: composite
@@ -47,7 +59,12 @@ runs:
           done
         fi
         if printf %s "$PASSWORD" | docker login 127.0.0.1:5001 -u buildcache --password-stdin >/dev/null 2>&1; then
-          echo "ref=127.0.0.1:5001/${IMAGE#registry.patty.io/}:buildcache" >> "$GITHUB_OUTPUT"
+          ref="127.0.0.1:5001/${IMAGE#registry.patty.io/}:buildcache"
+          {
+            echo "ref=$ref"
+            echo "cache-from=type=registry,ref=$ref"
+            echo "cache-to=type=registry,ref=$ref,mode=max,ignore-error=true,compression=uncompressed"
+          } >> "$GITHUB_OUTPUT"
         else
           echo "::warning::Build layer cache unreachable: building without it."
         fi
